@@ -39,6 +39,12 @@
 #include "plug.h"
 #endif
 
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
+#include <linux/input/doubletap2wake.h>
+#endif
+#endif
+
 /* Version */
 #define MXT_VER_20		20
 #define MXT_VER_21		21
@@ -548,7 +554,6 @@ struct mxt_data {
 	u8 atchthr;
 	u8 sensitive_mode;
 	int golden_ok;
-	bool keys_off;
 
 	/* Slowscan parameters	*/
 	int slowscan_enabled;
@@ -1289,9 +1294,8 @@ static void mxt_proc_t15_messages(struct mxt_data *data, u8 *msg)
 	unsigned long keystates = le32_to_cpu(msg[2]);
 	int index = data->current_index;
 
-	if(data->keys_off) {
+	if (!input_dev)
 		return;
-	}
 
 	for (key = 0; key < pdata->config_array[index].key_num; key++) {
 		curr_state = test_bit(key, &data->keystatus);
@@ -3196,36 +3200,6 @@ static ssize_t mxt_pause_store(struct device *dev,
 	}
 }
 
-static ssize_t mxt_keys_off_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct mxt_data *data = dev_get_drvdata(dev);
-	int count;
-	char c;
-
-	c = data->keys_off ? '1' : '0';
-	count = sprintf(buf, "%c\n", c);
-
-	return count;
-}
-
-static ssize_t mxt_keys_off_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct mxt_data *data = dev_get_drvdata(dev);
-	int i;
-
-	if (sscanf(buf, "%u", &i) == 1 && i < 2) {
-		data->keys_off = (i == 1);
-
-		dev_dbg(dev, "%s\n", i ? "hw keys off" : "hw keys on");
-		return count;
-	} else {
-		dev_dbg(dev, "keys_off write error\n");
-		return -EINVAL;
-	}
-}
-
 static ssize_t mxt_debug_enable_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -4065,8 +4039,6 @@ static DEVICE_ATTR(debug_enable, S_IWUSR | S_IRUSR, mxt_debug_enable_show,
 			mxt_debug_enable_store);
 static DEVICE_ATTR(pause_driver, S_IWUSR | S_IRUSR, mxt_pause_show,
 			mxt_pause_store);
-static DEVICE_ATTR(keys_off, S_IWUSR | S_IRUSR, mxt_keys_off_show,
-			mxt_keys_off_store);
 static DEVICE_ATTR(version, S_IRUGO, mxt_version_show, NULL);
 static DEVICE_ATTR(build, S_IRUGO, mxt_build_show, NULL);
 static DEVICE_ATTR(slowscan_enable, S_IWUSR | S_IRUSR,
@@ -4087,7 +4059,6 @@ static struct attribute *mxt_attrs[] = {
 	&dev_attr_debug_enable.attr,
 	&dev_attr_pause_driver.attr,
 	&dev_attr_version.attr,
-	&dev_attr_keys_off.attr,
 	&dev_attr_build.attr,
 	&dev_attr_slowscan_enable.attr,
 	&dev_attr_update_fw_flag.attr,
@@ -4240,7 +4211,19 @@ static int mxt_input_enable(struct input_dev *in_dev)
 {
 	int error = 0;
 	struct mxt_data *ts = input_get_drvdata(in_dev);
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+	bool prevent_sleep = false;
+	struct i2c_client *client = to_i2c_client(&ts->client->dev);
+#if defined(CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE)
+	prevent_sleep = (dt2w_switch > 0);
+#endif
+#endif
 
+#if defined(CONFIG_TOUCHSCREEN_PREVENT_SLEEP)
+	if (prevent_sleep)
+		disable_irq_wake(client->irq);
+	else
+#endif
 	error = mxt_resume(&ts->client->dev);
 	if (error)
 		dev_err(&ts->client->dev, "%s: failed\n", __func__);
@@ -4252,7 +4235,19 @@ static int mxt_input_disable(struct input_dev *in_dev)
 {
 	int error = 0;
 	struct mxt_data *ts = input_get_drvdata(in_dev);
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+	bool prevent_sleep = false;
+	struct i2c_client *client = to_i2c_client(&ts->client->dev);
+#if defined(CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE)
+	prevent_sleep = (dt2w_switch > 0);
+#endif
+#endif
 
+#if defined(CONFIG_TOUCHSCREEN_PREVENT_SLEEP)
+	if (prevent_sleep)
+		enable_irq_wake(client->irq);
+	else
+#endif
 	error = mxt_suspend(&ts->client->dev);
 	if (error)
 		dev_err(&ts->client->dev, "%s: failed\n", __func__);
@@ -4803,7 +4798,12 @@ static int __devinit mxt_probe(struct i2c_client *client,
 #endif
 #else
 	error = request_threaded_irq(client->irq, NULL, mxt_interrupt,
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+			pdata->irqflags | IRQF_NO_SUSPEND, client->dev.driver->name, data);
+#else
 			pdata->irqflags, client->dev.driver->name, data);
+#endif
+
 	if (error) {
 		dev_err(&client->dev, "Error %d registering irq\n", error);
 		goto err_free_input_device;
@@ -4965,4 +4965,3 @@ module_exit(mxt_exit);
 MODULE_AUTHOR("Lionel Zhang <zhangbo_a@xiaomi.com>");
 MODULE_DESCRIPTION("Atmel maXTouch Touchscreen driver");
 MODULE_LICENSE("GPL");
-

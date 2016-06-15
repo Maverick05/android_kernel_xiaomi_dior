@@ -1080,6 +1080,12 @@ config TOUCHSCREEN_IST30XX
 
           If unsure, say N.
 
+config STATE_NOTIFIER
+        bool "State Notifier"
+	default y
+
+source "drivers/input/touchscreen/gt9xx/Kconfig"
+
 config TOUCHSCREEN_DOUBLETAP2WAKE
 	tristate "DoubleTap2Wake for touchscreens"
 	select TOUCHSCREEN_PREVENT_SLEEP
@@ -1089,12 +1095,6 @@ config TOUCHSCREEN_PREVENT_SLEEP
 	bool "Inihibit sleep on modified touchscreen drivers"
 	default n
 	help
-	  This disables the sleep function of modified touchscreen drivers.         
-
-config STATE_NOTIFIER
-        bool "State Notifier"
-	default y
-
-source "drivers/input/touchscreen/gt9xx/Kconfig"
+	  This disables the sleep function of modified touchscreen drivers.
 
 endif
